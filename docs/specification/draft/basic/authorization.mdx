@@ -386,12 +386,13 @@ sequenceDiagram
         Note over C: Use existing client_id
     end
 
-    Note over C: Generate PKCE parameters<br/>Include resource parameter<br/>Apply scope selection strategy
-    C->>B: Open browser with authorization URL + code_challenge + resource
+    Note over C: Generate PKCE parameters<br/>Generate state parameter<br/>Include resource parameter<br/>Apply scope selection strategy
+    C->>B: Open browser with authorization URL + code_challenge + state + resource
     B->>A: Authorization request with resource parameter
     Note over A: User authorizes
-    A->>B: Redirect to callback with authorization code
+    A->>B: Redirect to callback with authorization code + state
     B->>C: Authorization code callback
+    Note over C: Verify state matches original value
     C->>A: Token request + code_verifier + resource
     A->>C: Access token (+ refresh token)
     C->>M: MCP request with access token
@@ -618,12 +619,53 @@ MCP clients **MUST** have redirect URIs registered with the authorization server
 
 Authorization servers **MUST** validate exact redirect URIs against pre-registered values to prevent redirection attacks.
 
-MCP clients **SHOULD** use and verify state parameters in the authorization code flow
-and discard any results that do not include or have a mismatch with the original state.
+MCP clients **MUST** use the `state` parameter in authorization requests and **MUST** verify
+it in the authorization response, discarding any responses that do not include the `state`
+parameter or where the value does not match the original.
+
+The `state` value **MUST** be generated using a cryptographically secure random function and
+**MUST** be bound to the user agent's session as required by
+[OAuth 2.1 Section 4.1.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13#section-4.1.1).
+This binding is critical for preventing session swapping attacks as described in the
+[Session Integrity](#session-integrity) section.
 
 Authorization servers **MUST** take precautions to prevent redirecting user agents to untrusted URI's, following suggestions laid out in [OAuth 2.1 Section 7.12.2](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13#section-7.12.2)
 
 Authorization servers **SHOULD** only automatically redirect the user agent if it trusts the redirection URI. If the URI is not trusted, the authorization server MAY inform the user and rely on the user to make the correct decision.
+
+### Session Integrity
+
+An attacker can exploit the authorization flow to swap the victim's session with the
+attacker's own authenticated session. In this attack, the attacker completes an
+authorization flow using their own credentials and then injects the resulting
+authorization response (containing the attacker's authorization code) into the victim's
+client. If successful, the victim's client obtains tokens associated with the attacker's
+account, causing the victim to unknowingly operate under the attacker's identity. Any
+sensitive data the victim submits may then be accessible to the attacker.
+
+While PKCE prevents authorization code injection by binding the code to the original
+client's `code_verifier`, the `state` parameter provides an essential additional layer of
+defense by binding the authorization request to the user agent's session. Together, these
+mechanisms ensure that:
+
+1. Only the client that initiated the authorization request can exchange the code (PKCE)
+2. The authorization response is processed in the same user agent session that initiated
+   the request (`state`)
+
+To prevent session swapping and fixation attacks:
+
+- MCP clients **MUST** generate a unique, cryptographically random `state` value for each
+  authorization request
+- MCP clients **MUST** bind the `state` value to the current user agent session (e.g.,
+  by storing it in session-specific storage or by hashing it with a session identifier)
+- MCP clients **MUST** verify the `state` value returned in the authorization response
+  matches the value associated with the current session, and reject the response if it
+  does not match
+- MCP clients **MUST** ensure `state` values are single-use and expire after a short time
+
+These requirements follow the guidance in
+[OAuth 2.1 Section 7.6](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13#section-7.6)
+and [OAuth 2.1 Section 7.12](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13#section-7.12).
 
 ### Client ID Metadata Document Security
 
